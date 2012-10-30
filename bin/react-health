@@ -65,7 +65,7 @@ $console
             });
             $request->on( 'end', function( $error, $response ) use( &$container, $website ) {
                 if( $error ) {
-                    $container[ $website ] = [ 'code' => 404 ];
+                    $container[ $website ] = [ 'code' => null ];
                 }
             });
             $request->end( );
@@ -113,7 +113,7 @@ $console
 
         $info = [ 'up' => 0, 'down' => 0 ];
         foreach( $container as $website => $result ) {
-            if( $result[ 'code' ] == 404 ) {
+            if( $result[ 'code' ] == null || ( $result[ 'code' ] >= 400 && $result[ 'code' ] < 600 ) ) {
                 $tag    = 'tkerror';
                 $text   = 'DOWN';
                 $info[ 'down' ]++;
