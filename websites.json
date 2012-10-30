@@ -1,0 +1,10 @@
+{
+    "websites":
+    [
+        "https://github.com",
+        "https://facebook.com",
+        "http://reddit.com",
+        "https://twitter.com",
+        "http://this-will-fail-as-a-website.com"
+    ]
+}

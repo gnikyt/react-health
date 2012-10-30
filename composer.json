@@ -1,0 +1,19 @@
+{
+    "name": "tyler-king/react-health",
+    "type": "bin",
+    "description": "Easily check all your websites' health.",
+    "keywords": ["react","async","health"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Tyler King",
+            "email": "tyler.king@newfie.co"
+        }
+    ],
+    "require": {
+        "php": ">=5.4.0",
+        "react/react": "0.2.*",
+        "symfony/console": "dev-master"
+    },
+    "bin": ["bin/react-health"]
+}

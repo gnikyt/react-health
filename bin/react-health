@@ -1,0 +1,152 @@
+#!/usr/bin/env php
+<?php
+
+use Symfony\Component\Console\Application;
+use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputInterface;
+use Symfony\Component\Console\Input\InputOption;
+use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Formatter\OutputFormatterStyle;
+use React\EventLoop\Factory as EventLoopFactory;
+use React\Dns\Resolver\Factory as DnsFactory;
+use React\HttpClient\Factory as HttpClientFactory;
+
+if( ( !@include __DIR__.'/../../../autoload.php' ) && ( !@include __DIR__.'/../vendor/autoload.php' ) ) {
+    die( 'You must set up the project dependencies, run the following commands:' . PHP_EOL .
+         'curl -s http://getcomposer.org/installer | php' . PHP_EOL .
+         'php composer.phar install' . PHP_EOL
+    );
+}
+
+$console = new Application;
+$console
+    ->register( 'run' )
+    ->setDescription( 'Checks the health of websites.' )
+    ->addOption(
+        'src',
+        null,
+        InputOption::VALUE_NONE,
+        'Location of website source file (json)'
+    )
+    ->addOption(
+        'websites',
+        null,
+        InputOption::VALUE_NONE,
+        'Check a single or multiple websites (comma seperated).'
+    )
+    ->setCode( function( InputInterface $input, OutputInterface $output ) {
+        $loop               = EventLoopFactory::create( );
+        $dnsResolverFactory = new DnsFactory;
+        $dnsResolver        = $dnsResolverFactory->createCached( '8.8.8.8', $loop );
+
+        $factory  = new HttpClientFactory;
+        $client   = $factory->create( $loop, $dnsResolver );
+
+        $src_option         = $input->getOption( 'src' ) ?: __DIR__ . '/../websites.json';
+        $websites_option    = $input->getOption( 'websites' );
+
+        if( !file_exists( $src_option ) && $websites_option == false ) {
+            $output->writeln( "<error>Website source file \"{$src_option}\" does not exist.</error>" );
+            exit;
+        }
+
+        $websites   = ( $websites_option ) ? explode( ',', $websites_option ) : json_decode( file_get_contents( $src_option ) )->websites;
+        $websites   = array_map( function( $value ) {
+            return ( strstr( $value, '://' ) ) ? $value : 'http://' . $value;
+        }, $websites );
+
+        $container  = [ ];
+        $count      = sizeof( $websites );
+        $start      = (float) array_sum( explode( ' ', microtime( ) ) );
+        foreach( $websites as $website ) {
+            $request = $client->request( 'GET', $website );
+            $request->on( 'response', function( $response ) use( &$container, $website ) {
+                $container[ $website ] = [ 'code' => $response->getCode( ) ];
+            });
+            $request->on( 'end', function( $error, $response ) use( &$container, $website ) {
+                if( $error ) {
+                    $container[ $website ] = [ 'code' => 404 ];
+                }
+            });
+            $request->end( );
+        }
+
+        $loop->run( );
+        $end    = (float) array_sum( explode( ' ', microtime( ) ) );
+        $total  = round( sprintf( "%.4f", ( $end - $start ) ), 2 );
+
+        $output->getFormatter( )->setStyle( 'tkok', new OutputFormatterStyle( 'white', 'green', [ 'bold' ] ) );
+        $output->getFormatter( )->setStyle( 'tkerror', new OutputFormatterStyle( 'white', 'red', [ 'bold' ] ) );
+
+        $lengths    = array_map( 'strlen', array_keys( $container ) );
+        $col_1      = [
+                        'name'      => 'WEBSITE',
+                        'length'    => max( $lengths ) + 2
+                    ];
+        $col_2      = [
+                        'name'      => 'STATUS',
+                        'length'    => 11
+                    ];
+
+        /* Table head. */
+        $output->writeln(
+            str_pad( '+', $col_1[ 'length' ], '-', STR_PAD_RIGHT ) .
+            str_pad( '+', $col_2[ 'length' ], '-', STR_PAD_RIGHT ) .
+            '+'
+        );
+        /* First column name. */
+        $output->write(
+            str_pad( '+ ' . $col_1[ 'name' ], $col_1[ 'length' ] ) .
+            '+'
+        );
+        /* Second column name. */
+        $output->writeln(
+            str_pad( ' ' . $col_2[ 'name' ], $col_2[ 'length' ] - 1 ) .
+            '+'
+        );
+        /* End of table head. */
+        $output->writeln(
+            str_pad( '+', $col_1[ 'length' ], '-', STR_PAD_RIGHT ) .
+            str_pad( '+', $col_2[ 'length' ], '-', STR_PAD_RIGHT ) .
+            '+'
+        );
+
+        $info = [ 'up' => 0, 'down' => 0 ];
+        foreach( $container as $website => $result ) {
+            if( $result[ 'code' ] == 404 ) {
+                $tag    = 'tkerror';
+                $text   = 'DOWN';
+                $info[ 'down' ]++;
+            } else {
+                $tag    = 'tkok';
+                $text   = 'UP';
+                $info[ 'up' ]++;
+            }
+
+            /* Column one entry. */
+            $output->write(
+                str_pad( '+ ' . parse_url( $website, PHP_URL_HOST ), $col_1[ 'length' ] ) .
+                '+'
+            );
+            /* Column two entry. */
+            $output->writeln(
+                "<{$tag}>" .
+                    str_pad( ' ' . $text . ' ' . $result[ 'code' ], $col_2[ 'length' ] - 1 ) .
+                "</{$tag}>+"
+            );
+            /* End of row entry. */
+            $output->writeln(
+                str_pad( '+', $col_1[ 'length' ], '-', STR_PAD_RIGHT ) .
+                str_pad( '+', $col_2[ 'length' ], '-', STR_PAD_RIGHT ) .
+                '+'
+            );
+        }
+
+        $output->writeln( "\n\nProcess time: {$total} seconds." );
+        if( $info[ 'down' ] > 0 ) {
+            $output->writeln( "<tkerror>There are {$info[ 'down' ]} websites down. {$info[ 'up' ]} websites up.</tkerror>" );
+        } else {
+            $output->writeln( "<tkok>All {$info[ 'up' ]} websites are up and running.</tkok>" );
+        }
+    });
+$console->run( );
