@@ -13,7 +13,7 @@
     "require": {
         "php": ">=5.4.0",
         "react/react": "0.2.*",
-        "symfony/console": "dev-master"
+        "symfony/console": "2.3.*@dev"
     },
     "bin": ["bin/react-health"]
 }

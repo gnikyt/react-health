@@ -34,119 +34,65 @@ $console
         InputOption::VALUE_NONE,
         'Check a single or multiple websites (comma seperated).'
     )
-    ->setCode(function(InputInterface $input, OutputInterface $output) {
+    ->setCode(function(InputInterface $input, OutputInterface $output) use($console) {
         $loop               = EventLoopFactory::create();
         $dnsResolverFactory = new DnsFactory;
         $dnsResolver        = $dnsResolverFactory->createCached('8.8.8.8', $loop);
 
-        $factory  = new HttpClientFactory;
-        $client   = $factory->create($loop, $dnsResolver);
+        $factory = new HttpClientFactory;
+        $client  = $factory->create($loop, $dnsResolver);
 
-        $src_option       = $input->getOption('src') ?: __DIR__.'/../websites.json';
-        $websites_option  = $input->getOption('websites');
+        $src_option      = $input->getOption('src') ?: __DIR__.'/../websites.json';
+        $websites_option = $input->getOption('websites');
 
         if (! file_exists($src_option) && $websites_option == false) {
             $output->writeln("<error>Website source file \"{$src_option}\" does not exist.</error>");
             exit;
         }
 
-        $websites = ($websites_option) ? explode(',', $websites_option) : json_decode(file_get_contents($src_option))->websites;
+        $websites = $websites_option ? explode(',', $websites_option) : json_decode(file_get_contents($src_option))->websites;
         $websites = array_map(function($value) {
-            return (strstr($value, '://')) ? $value : 'http://'.$value;
+            return strstr($value, '://') ? $value : 'http://'.$value;
         }, $websites);
 
-        $container  = [];
-        $count      = sizeof($websites);
-        $start      = (float) array_sum(explode(' ', microtime()));
+        $rows  = [];
+        $up    = 0;
+        $down  = 0;
+        $count = sizeof($websites);
+        $start = (float) array_sum(explode(' ', microtime()));
+
         foreach ($websites as $website) {
             $request = $client->request('GET', $website);
-            $request->on('response', function($response) use(&$container, $website) {
-                $container[$website] = ['code' => $response->getCode()];
+            $request->on('response', function($response) use(&$rows, $website) {
+                $rows[] = [$website, (int) $response->getCode(), 'UP'];
             });
-            $request->on('end', function($error, $response) use(&$container, $website) {
+            $request->on('end', function($error, $response) use(&$rows, &$up, &$down, $website) {
                 if ($error) {
-                    $container[$website] = ['code' => null];
+                    $rows[] = [$website, 404, 'DOWN'];
+                    $down++;
                 }
+
+                $up++;
             });
             $request->end();
         }
 
         $loop->run();
-        $end    = (float) array_sum(explode(' ', microtime()));
-        $total  = round(sprintf("%.4f", ($end - $start)), 2);
 
-        $output->getFormatter()->setStyle('tkok', new OutputFormatterStyle('white', 'green', ['bold']));
-        $output->getFormatter()->setStyle('tkerror', new OutputFormatterStyle('white', 'red', ['bold']));
+        $end   = (float) array_sum(explode(' ', microtime()));
+        $total = round(sprintf("%.4f", ($end - $start)), 2);
 
-        $lengths    = array_map('strlen', array_keys($container));
-        $col_1      = [
-                        'name'   => 'WEBSITE',
-                        'length' => max($lengths)+2
-                    ];
-        $col_2      = [
-                        'name'   => 'STATUS',
-                        'length' => 11
-                    ];
+        $table = $console->getHelperSet()->get('table');
+        $table
+            ->setHeaders(['Website', 'Code', 'Status'])
+            ->setRows($rows)
+            ->render($output);
 
-        /* Table head. */
-        $output->writeln(
-            str_pad('+', $col_1['length'], '-', STR_PAD_RIGHT) .
-            str_pad('+', $col_2['length'], '-', STR_PAD_RIGHT) .
-            '+'
-        );
-        /* First column name. */
-        $output->write(
-            str_pad('+ '.$col_1['name'], $col_1['length']) .
-            '+'
-        );
-        /* Second column name. */
-        $output->writeln(
-            str_pad(' '.$col_2['name'], $col_2['length']-1) .
-            '+'
-       );
-        /* End of table head. */
-        $output->writeln(
-            str_pad('+', $col_1['length'], '-', STR_PAD_RIGHT) .
-            str_pad('+', $col_2['length'], '-', STR_PAD_RIGHT) .
-            '+'
-        );
-
-        $info = ['up' => 0, 'down' => 0];
-        foreach ($container as $website => $result) {
-            if ($result['code'] == null || ($result['code'] >= 400 && $result['code'] < 600)) {
-                $tag  = 'tkerror';
-                $text = 'DOWN';
-                $info['down']++;
-            } else {
-                $tag  = 'tkok';
-                $text = 'UP';
-                $info['up']++;
-            }
-
-            /* Column one entry. */
-            $output->write(
-                str_pad('+ '.parse_url($website, PHP_URL_HOST), $col_1['length']) .
-                '+'
-            );
-            /* Column two entry. */
-            $output->writeln(
-                "<{$tag}>" .
-                    str_pad(' '. $text.' '.$result['code'], $col_2['length']-1) .
-                "</{$tag}>+"
-            );
-            /* End of row entry. */
-            $output->writeln(
-                str_pad('+', $col_1['length'], '-', STR_PAD_RIGHT) .
-                str_pad('+', $col_2['length'], '-', STR_PAD_RIGHT) .
-                '+'
-            );
-        }
-
-        $output->writeln("\n\nProcess time: {$total} seconds.");
-        if ($info['down'] > 0) {
-            $output->writeln("<tkerror>There are {$info['down']} websites down. {$info['up']} websites up.</tkerror>");
+        $output->writeln("\nProcessed {$count} websites in {$total} seconds.");
+        if ($down > 0) {
+            $output->writeln("<error>There are {$down} websites down. {$up} websites up.</error>");
         } else {
-            $output->writeln("<tkok>All {$info['up']} websites are up and running.</tkok>");
+            $output->writeln("<info>All {$up} websites are up and running.</info>");
         }
     });
 $console->run();
